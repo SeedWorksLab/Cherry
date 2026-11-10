@@ -1,5 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import type { BrewMethodId, BrewerKind, Method, MethodFamily } from '../models';
+import type { BrewMethodId, EquipmentKind, Method, MethodFamily } from '../models';
 import { getDatabase } from './database';
 
 interface MethodRow {
@@ -19,7 +19,7 @@ function rowToMethod(row: MethodRow): Method {
     id: row.id as BrewMethodId,
     name: row.name,
     family: row.family as MethodFamily,
-    brewerKind: row.brewer_kind as BrewerKind | null,
+    brewerKind: row.brewer_kind as EquipmentKind | null,
     supportsPressure: row.supports_pressure === 1,
     supportsGrinder: row.supports_grinder === 1,
     defaultStepTemplate: row.default_step_template,

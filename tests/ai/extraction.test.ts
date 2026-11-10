@@ -16,6 +16,7 @@ const FULL_RESPONSE = {
   bean_name: 'Kenya Nyeri',
   brewer_name: 'V60 02',
   grinder_name: 'Comandante',
+  equipment_names: ['Timemore scale'],
   grind_setting_name: '22 clicks',
   dose_g: 15,
   water_total_g: 250,
@@ -47,6 +48,7 @@ const CONTEXT: ExtractionContext = {
   beans: ['Kenya Nyeri', 'Brazil Cerrado'],
   brewers: ['V60 02', 'Aeropress'],
   grinders: ['Comandante'],
+  equipment: ['Timemore scale', 'Fellow Stagg kettle'],
   grindSettings: ['22 clicks'],
   flavourTags: ['Blackcurrant', 'Citrus', 'Chocolate'],
   languageHint: 'en',
@@ -80,6 +82,7 @@ describe('parseExtractionJson', () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.methodId).toBe('v60');
     expect(parsed?.doseG).toBe(15);
+    expect(parsed?.equipmentNames).toEqual(['Timemore scale']);
     expect(parsed?.steps).toHaveLength(2);
     expect(parsed?.steps[0]).toEqual({
       kind: 'bloom',
@@ -122,6 +125,7 @@ describe('brewCandidates and tastingCandidates', () => {
     const paths = brew.map((candidate) => candidate.fieldPath);
     expect(paths).toContain('dose_g');
     expect(paths).toContain('bean_name');
+    expect(paths).toContain('equipment_names');
     expect(brew.every((candidate) => candidate.target === 'brew')).toBe(true);
 
     const tasting = tastingCandidates(parsed);
@@ -171,6 +175,7 @@ describe('resolveExtractionNames', () => {
     expect(resolved.bean?.name).toBe('Kenya Nyeri');
     expect(resolved.brewer?.name).toBe('V60 02');
     expect(resolved.grinder?.name).toBe('Comandante');
+    expect(resolved.equipment.map((match) => match.name)).toEqual(['Timemore scale']);
     expect(resolved.matchedMethodName).toBe('v60');
     expect(resolved.flavourTagIds).toEqual(['Blackcurrant', 'Citrus']);
     expect(resolved.unmatchedFlavourTags).toEqual([]);
@@ -193,7 +198,7 @@ describe('runExtraction', () => {
     const outcome = await runExtraction({
       provider: fakeProvider(JSON.stringify(FULL_RESPONSE), { inputTokens: 100, outputTokens: 50 }),
       model: 'gpt-x',
-      phasedTranscript: '[brew] fifteen grams to two fifty',
+      transcript: 'fifteen grams to two fifty',
       context: CONTEXT,
     });
     expect(outcome.parsed.doseG).toBe(15);
@@ -205,7 +210,7 @@ describe('runExtraction', () => {
       runExtraction({
         provider: fakeProvider('I could not understand that'),
         model: 'gpt-x',
-        phasedTranscript: 'hello',
+        transcript: 'hello',
         context: CONTEXT,
       })
     ).rejects.toThrow();

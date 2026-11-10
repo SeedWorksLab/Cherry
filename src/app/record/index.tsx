@@ -1,21 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Button, IconButton, Text } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import dayjs from 'dayjs';
 import { ScreenFade } from '../../components/screen-fade';
 import { KeyboardAwareScrollView } from '../../components/keyboard-aware-scroll-view';
+import { RecordingWaves } from '../../components/recording-waves';
 import { ScreenToast } from '../../components/screen-toast';
 import { AppDialog } from '../../components/app-dialog';
 import { useAppData } from '../../data/DataProvider';
 import { useAppTheme } from '../../theme';
-import { VOICE_PHASES } from '../../models';
-import type { VoiceMoment, VoicePhase, VoiceSession } from '../../models';
+import type { VoiceMoment, VoiceSession } from '../../models';
 import {
   closeVoiceMoment,
-  createPhaseMarker,
   createVoiceMoment,
   createVoiceSession,
   getMomentsBySession,
@@ -23,15 +23,9 @@ import {
   getVoiceSession,
   markMomentTranscriptFailed,
   setMomentTranscript,
-  setVoiceMomentPhase,
   setVoiceSessionState,
 } from '../../database/voiceSessions';
-import {
-  defaultPhase,
-  elapsedSeconds,
-  phaseAfterGap,
-  formatTranscriptStatus,
-} from '../../services/voice-session-service';
+import { meteringLevel, recordedDurationMs } from '../../services/voice-session-service';
 import { buildProvider } from '../../ai/provider';
 import { transcribeMomentWithProvider } from '../../ai/transcription';
 import {
@@ -55,13 +49,8 @@ const CAFE_CONTEXT: string[] = [
   'french press',
 ];
 
-const PHASE_LABELS: Record<VoicePhase, string> = {
-  prep: 'Prep',
-  brew: 'Brew',
-  finish: 'Finish',
-  taste: 'Taste',
-  note: 'Note',
-};
+const RECORD_SIZE = 112;
+const RECORD_AREA_HEIGHT = RECORD_SIZE + 56;
 
 function nowIso(): string {
   return dayjs().toISOString();
@@ -90,19 +79,19 @@ export default function RecordScreen() {
 
   const [session, setSession] = useState<VoiceSession | null>(null);
   const [moments, setMoments] = useState<VoiceMoment[]>([]);
-  const [activePhase, setActivePhase] = useState<VoicePhase>(defaultPhase());
   const [paused, setPaused] = useState(false);
   const [openMomentId, setOpenMomentId] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [openStartedAt, setOpenStartedAt] = useState<number | null>(null);
   const [, setNowTick] = useState(0);
   const liveHandleRef = useRef<LiveTranscriptionHandle | null>(null);
-  const momentStartRef = useRef<number>(0);
 
   const engine = aiState.sttEngine;
   const liveAvailable = engine === 'android' && isLiveTranscriptionAvailable() && Platform.OS !== 'web';
+  const recording = openMomentId !== null;
 
   const reloadSessionData = useCallback(async (sessionId: number) => {
     const nextMoments = await getMomentsBySession(sessionId);
@@ -132,9 +121,11 @@ export default function RecordScreen() {
           }
           const lastActive = latest.updatedAt ?? latest.endedAt ?? latest.startedAt;
           if (isRecent(lastActive, settings.sessionResumeThresholdMinutes)) {
-            setSession(latest);
+            await setVoiceSessionState(latest.id, 'paused');
+            const resumed = await getVoiceSession(latest.id);
+            setSession(resumed ?? latest);
             await reloadSessionData(latest.id);
-            setActivePhase(latest.defaultPhase ?? defaultPhase());
+            setPaused(true);
             if (!cancelled) {
               setReady(true);
             }
@@ -145,16 +136,17 @@ export default function RecordScreen() {
         const id = await createVoiceSession({
           brewId: null,
           planId: null,
-          state: 'recording',
+          state: 'paused',
           startedAt: nowIso(),
           endedAt: null,
-          defaultPhase: defaultPhase(),
+          defaultPhase: null,
           engine: aiState.sttEngine,
           language: aiState.sttLanguage,
         });
         const created = await getVoiceSession(id);
         if (!cancelled && created) {
           setSession(created);
+          setPaused(true);
           setReady(true);
         }
       } catch {
@@ -173,16 +165,16 @@ export default function RecordScreen() {
   }, []);
 
   const sessionId = session?.id ?? null;
-  const metering = recorderState.metering !== undefined ? Math.min(1, Math.max(0, recorderState.metering)) : 0;
+  const metering = meteringLevel(recorderState.metering);
 
-  async function openNextMoment(phase: VoicePhase) {
+  async function openNextMoment() {
     if (sessionId === null || session === null) {
       return;
     }
     const startOffsetMs = Math.max(0, dayjs().valueOf() - dayjs(session.startedAt).valueOf());
     const id = await createVoiceMoment({
       sessionId,
-      phase,
+      phase: null,
       startOffsetMs,
       durationMs: null,
       audioPath: null,
@@ -191,7 +183,7 @@ export default function RecordScreen() {
       transcriptEngine: null,
       transcriptStatus: 'pending',
     });
-    momentStartRef.current = dayjs().valueOf();
+    setOpenStartedAt(dayjs().valueOf());
     setOpenMomentId(id);
 
     try {
@@ -199,6 +191,7 @@ export default function RecordScreen() {
       recorder.record();
     } catch {
       setToast('Could not start recording');
+      setOpenStartedAt(null);
       setOpenMomentId(null);
       return;
     }
@@ -217,10 +210,12 @@ export default function RecordScreen() {
       return;
     }
     const momentId = openMomentId;
+    const startedAt = openStartedAt ?? dayjs().valueOf();
     setOpenMomentId(null);
+    setOpenStartedAt(null);
     setBusy(true);
     try {
-      const durationMs = Math.max(0, dayjs().valueOf() - momentStartRef.current);
+      const durationMs = Math.max(0, dayjs().valueOf() - startedAt);
 
       let liveText: { text: string; confidence: number | null } | null = null;
       if (liveAvailable && liveHandleRef.current) {
@@ -247,60 +242,16 @@ export default function RecordScreen() {
     }
   }
 
-  async function handleRecordPress() {
-    if (busy) {
+  async function startRecording() {
+    if (sessionId === null || session === null) {
       return;
     }
-    if (openMomentId !== null) {
-      await closeCurrentMoment();
-      return;
-    }
-    if (paused) {
-      if (sessionId === null || session === null) {
-        return;
-      }
-      const gapMs = dayjs().valueOf() - dayjs(lastActivityAt()).valueOf();
-      const phase = phaseAfterGap(activePhase, gapMs, settings.sessionResumeThresholdMinutes * 60_000);
-      if (phase !== activePhase) {
-        setActivePhase(phase);
-        await createPhaseMarker(sessionId, phase, momentOffsetNow());
-      }
-      setPaused(false);
-      await openNextMoment(phase);
-      return;
-    }
-    await openNextMoment(activePhase);
+    setPaused(false);
+    await setVoiceSessionState(sessionId, 'recording');
+    await openNextMoment();
   }
 
-  function momentOffsetNow(): number {
-    if (session === null) {
-      return 0;
-    }
-    return Math.max(0, dayjs().valueOf() - dayjs(session.startedAt).valueOf());
-  }
-
-  function lastActivityAt(): string {
-    const lastMoment = moments[moments.length - 1];
-    if (lastMoment?.updatedAt) {
-      return lastMoment.updatedAt;
-    }
-    return session?.updatedAt ?? session?.startedAt ?? nowIso();
-  }
-
-  async function handlePhaseSelect(next: VoicePhase) {
-    if (next === activePhase || sessionId === null || session === null) {
-      return;
-    }
-    setActivePhase(next);
-    const offsetMs = momentOffsetNow();
-    await createPhaseMarker(sessionId, next, offsetMs);
-    if (openMomentId !== null) {
-      await setVoiceMomentPhase(openMomentId, next);
-      await reloadSessionData(sessionId);
-    }
-  }
-
-  async function handlePause() {
+  async function pauseRecording() {
     if (openMomentId !== null) {
       await closeCurrentMoment();
     }
@@ -308,6 +259,17 @@ export default function RecordScreen() {
     if (sessionId !== null) {
       await setVoiceSessionState(sessionId, 'paused');
     }
+  }
+
+  async function handleRecordPress() {
+    if (busy) {
+      return;
+    }
+    if (recording) {
+      await pauseRecording();
+      return;
+    }
+    await startRecording();
   }
 
   async function handleFinish() {
@@ -383,6 +345,7 @@ export default function RecordScreen() {
         if (recordedUri) {
           deleteAudioFile(recordedUri);
         }
+        setOpenStartedAt(null);
         setOpenMomentId(null);
       }
       for (const moment of moments) {
@@ -398,8 +361,6 @@ export default function RecordScreen() {
       setBusy(false);
     }
   }
-
-  const elapsedTot = session ? elapsedSeconds(session.startedAt, nowIso()) : 0;
 
   if (!ready) {
     return (
@@ -421,7 +382,12 @@ export default function RecordScreen() {
     );
   }
 
-  const meterHeight = Math.round(24 * metering);
+  const openDurationMs = recording && openStartedAt !== null ? Math.max(0, dayjs().valueOf() - openStartedAt) : 0;
+  const recordedSeconds = Math.floor(recordedDurationMs(moments, openDurationMs) / 1000);
+  const statusLabel = recording ? 'Recording' : paused && moments.length > 0 ? 'Paused' : 'Ready';
+  const iconName = recording ? 'pause' : paused && moments.length > 0 ? 'play' : 'microphone';
+  const buttonBackground = recording ? theme.colors.primary : theme.colors.primaryContainer;
+  const iconColor = recording ? theme.colors.onPrimary : theme.colors.onPrimaryContainer;
 
   return (
     <ScreenFade>
@@ -432,14 +398,9 @@ export default function RecordScreen() {
         ]}
       >
         <View style={styles.header}>
-          <View>
-            <Text variant="titleMedium" style={styles.headerTitle}>
-              {paused ? 'Paused' : openMomentId !== null ? 'Recording' : 'Ready'}
-            </Text>
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-              {formatClock(elapsedTot)} · {PHASE_LABELS[activePhase]} phase
-            </Text>
-          </View>
+          <Text variant="titleMedium" style={styles.headerTitle}>
+            {statusLabel}
+          </Text>
           <IconButton
             icon="close"
             onPress={() => setConfirmDiscard(true)}
@@ -448,136 +409,66 @@ export default function RecordScreen() {
           />
         </View>
 
-        <View style={styles.chips}>
-          {VOICE_PHASES.map((phase) => (
-            <Pressable
-              key={phase}
-              onPress={() => handlePhaseSelect(phase)}
-              accessibilityRole="button"
-              accessibilityLabel={`Set phase to ${PHASE_LABELS[phase]}`}
-              testID={`record-phase-${phase}`}
-            >
-              <View
-                style={[
-                  styles.phaseChip,
-                  {
-                    backgroundColor:
-                      activePhase === phase ? theme.colors.primaryContainer : theme.colors.surfaceVariant,
-                    borderColor: activePhase === phase ? theme.colors.primary : 'transparent',
-                  },
-                ]}
-              >
-                <Text
-                  variant="labelMedium"
-                  style={{ color: activePhase === phase ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant }}
-                >
-                  {PHASE_LABELS[phase]}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
+        <View style={styles.timerBlock}>
+          <Text variant="displayMedium" style={[styles.timer, { color: theme.colors.onSurface }]}>
+            {formatClock(recordedSeconds)}
+          </Text>
+          <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+            Recorded
+          </Text>
         </View>
 
-        <View style={styles.meterWrap}>
-          <View style={[styles.meterTrack, { backgroundColor: theme.colors.surfaceVariant }]}>
-            <View
-              style={[
-                styles.meterFill,
-                { height: Math.max(4, meterHeight), backgroundColor: theme.colors.primary },
-              ]}
-            />
-          </View>
-        </View>
-
-        <View style={styles.centerButtons}>
+        <View style={styles.recordArea}>
+          <RecordingWaves
+            level={metering}
+            active={recording}
+            size={RECORD_SIZE}
+            color={theme.colors.primary}
+          />
           <Pressable
             onPress={handleRecordPress}
             disabled={busy}
             accessibilityRole="button"
-            accessibilityLabel={openMomentId !== null ? 'Stop recording this moment' : paused ? 'Resume recording' : 'Start recording a moment'}
+            accessibilityState={{ busy }}
+            accessibilityLabel={
+              recording
+                ? 'Pause recording'
+                : paused && moments.length > 0
+                  ? 'Resume recording'
+                  : 'Start recording'
+            }
             testID="record-mic"
           >
             <View
               style={[
                 styles.micButton,
-                {
-                  backgroundColor:
-                    busy
-                      ? theme.colors.surfaceVariant
-                      : openMomentId !== null
-                        ? theme.colors.errorContainer
-                        : theme.colors.primary,
-                },
+                { width: RECORD_SIZE, height: RECORD_SIZE, borderRadius: RECORD_SIZE / 2, backgroundColor: buttonBackground },
               ]}
             >
-              <Text
-                variant="titleLarge"
-                style={{ color: openMomentId !== null ? theme.colors.onErrorContainer : theme.colors.onPrimary }}
-              >
-                {openMomentId !== null ? '◼' : paused ? '▶' : '●'}
-              </Text>
+              <MaterialCommunityIcons name={iconName} size={48} color={iconColor} />
             </View>
           </Pressable>
-          <Text variant="bodySmall" style={styles.hint}>
-            {openMomentId !== null
-              ? 'Tap to end this moment'
-              : paused
-                ? 'Tap to resume recording'
-                : 'Tap while speaking to record a moment'}
-          </Text>
         </View>
 
-        {moments.length > 0 ? (
-          <View style={styles.momentsCard}>
-            {moments.map((moment, index) => {
-              const phaseLabel = PHASE_LABELS[moment.phase ?? activePhase] ?? '—';
-              const shown = index === moments.length - 1 && openMomentId === moment.id;
-              return (
-                <View key={moment.id} style={styles.momentRow}>
-                  <Text variant="labelMedium" style={{ color: theme.colors.primary }}>
-                    {phaseLabel}
-                  </Text>
-                  <View style={styles.momentBody}>
-                    <Text variant="bodySmall" numberOfLines={1}>
-                      {shown
-                        ? 'Recording…'
-                        : moment.transcript ?? (moment.transcriptStatus === 'succeeded' ? '' : '')}
-                    </Text>
-                  </View>
-                  <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                    {shown ? '…' : formatSpeechStatus(moment.transcriptStatus)}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <Text variant="bodySmall" style={styles.emptyMoments}>
-            No moments yet. Speak, then tap the button to close each moment.
-          </Text>
-        )}
+        <Text variant="bodySmall" style={styles.hint}>
+          {recording
+            ? 'Tap to pause. Ramble freely — nothing needs to be precise.'
+            : paused && moments.length > 0
+              ? 'Tap to keep recording, or send when you are done.'
+              : 'Tap to start. Pause any time, then send.'}
+        </Text>
 
         <View style={styles.actions}>
           <Button
-            mode="outlined"
-            icon={paused ? 'play' : 'pause'}
-            onPress={handlePause}
-            disabled={busy}
-            style={styles.action}
-            testID="record-pause"
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
-          <Button
             mode="contained"
-            icon="check"
+            icon="send"
             onPress={handleFinish}
             loading={busy}
-            disabled={busy}
+            disabled={busy || (!recording && moments.length === 0)}
             style={styles.action}
-            testID="record-finish"
+            testID="record-send"
           >
-            Finish and extract
+            Send
           </Button>
         </View>
 
@@ -611,16 +502,6 @@ export default function RecordScreen() {
   );
 }
 
-function formatSpeechStatus(status: VoiceMoment['transcriptStatus']): string {
-  if (status === 'failed') {
-    return 'Not recognised';
-  }
-  if (status === 'skipped') {
-    return 'Type it';
-  }
-  return formatTranscriptStatus(status);
-}
-
 const STT_ENGINE_NAME = 'openai-compatible';
 
 const styles = StyleSheet.create({
@@ -638,62 +519,26 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontWeight: '700',
   },
-  chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 16,
-  },
-  phaseChip: {
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  meterWrap: {
-    marginTop: 20,
-  },
-  meterTrack: {
-    height: 24,
-    borderRadius: 12,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-  },
-  meterFill: {
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    alignSelf: 'stretch',
-  },
-  centerButtons: {
+  timerBlock: {
     alignItems: 'center',
     marginTop: 24,
   },
+  timer: {
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+  },
+  recordArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: RECORD_AREA_HEIGHT,
+    marginTop: 32,
+  },
   micButton: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   hint: {
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  momentsCard: {
-    marginTop: 24,
-  },
-  momentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  momentBody: {
-    flex: 1,
-    paddingHorizontal: 12,
-  },
-  emptyMoments: {
-    marginTop: 24,
+    marginTop: 8,
     textAlign: 'center',
   },
   actions: {

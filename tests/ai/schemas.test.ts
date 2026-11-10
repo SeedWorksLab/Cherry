@@ -74,6 +74,7 @@ describe('emptyParsedExtraction', () => {
     expect(parsed.promptVersion).toBe('1');
     expect(parsed.methodId).toBeNull();
     expect(parsed.doseG).toBeNull();
+    expect(parsed.equipmentNames).toEqual([]);
     expect(parsed.steps).toEqual([]);
     expect(parsed.flavourTags).toEqual([]);
     expect(parsed.questions).toEqual([]);
@@ -87,6 +88,7 @@ describe('extractionSchemaJson', () => {
     expect(String(schema.method_id)).toContain('v60');
     expect(String(schema.method_id)).toContain('null');
     expect(Array.isArray(schema.steps)).toBe(true);
+    expect(Array.isArray(schema.equipment_names)).toBe(true);
     expect(schema.tasting).toBeDefined();
   });
 });

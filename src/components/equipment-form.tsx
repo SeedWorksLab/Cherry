@@ -1,45 +1,58 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Switch, Text, TextInput } from 'react-native-paper';
-import type { BrewMethodId, Brewer, BrewerKind } from '../models';
-import { BREWER_KINDS } from '../models';
-import type { BrewerInput } from '../database/brewers';
+import { Button, Chip, Switch, Text, TextInput } from 'react-native-paper';
+import type { BrewMethodId, Equipment, EquipmentKind, ScaleMode } from '../models';
+import { EQUIPMENT_KINDS, SCALE_MODES } from '../models';
+import type { EquipmentInput } from '../database/equipment';
 import { useAppData } from '../data/DataProvider';
 import { useAppTheme } from '../theme';
-import { BREWER_KIND_LABELS, METHOD_LABELS } from '../utils/labels';
+import { EQUIPMENT_KIND_LABELS, METHOD_LABELS, SCALE_MODE_LABELS } from '../utils/labels';
 import { methodsForKind } from '../services/equipment-service';
 import { KeyboardAwareScrollView } from './keyboard-aware-scroll-view';
 import { NumberField } from './number-field';
 import { OptionField } from './option-field';
 
-interface BrewerFormProps {
-  initial: Brewer | null;
-  defaultKind?: BrewerKind;
+interface EquipmentFormProps {
+  initial: Equipment | null;
+  defaultKind?: EquipmentKind;
   submitting: boolean;
-  onSubmit: (input: BrewerInput) => Promise<void>;
+  onSubmit: (input: EquipmentInput) => Promise<void>;
 }
 
-const KIND_OPTIONS = BREWER_KINDS.map((value) => ({
+const KIND_OPTIONS = EQUIPMENT_KINDS.map((value) => ({
   value,
-  label: BREWER_KIND_LABELS[value],
+  label: EQUIPMENT_KIND_LABELS[value],
 }));
 
-export function BrewerForm({
+export function EquipmentForm({
   initial,
   defaultKind = 'dripper',
   submitting,
   onSubmit,
-}: BrewerFormProps) {
+}: EquipmentFormProps) {
   const theme = useAppTheme();
   const { methods } = useAppData();
   const [name, setName] = useState(initial?.name ?? '');
-  const [kind, setKind] = useState<BrewerKind>(initial?.kind ?? defaultKind);
+  const [kind, setKind] = useState<EquipmentKind>(initial?.kind ?? defaultKind);
   const [methodId, setMethodId] = useState<BrewMethodId | null>(initial?.methodId ?? null);
   const [manufacturer, setManufacturer] = useState(initial?.manufacturer ?? '');
   const [model, setModel] = useState(initial?.model ?? '');
   const [capacityMl, setCapacityMl] = useState<number | null>(initial?.capacityMl ?? null);
   const [material, setMaterial] = useState(initial?.material ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [scalePrecisionG, setScalePrecisionG] = useState<number | null>(
+    initial?.scalePrecisionG ?? null
+  );
+  const [scaleCapacityG, setScaleCapacityG] = useState<number | null>(
+    initial?.scaleCapacityG ?? null
+  );
+  const [scaleModes, setScaleModes] = useState<ScaleMode[]>(initial?.scaleModes ?? []);
+  const [grinderClicksPerRevolution, setGrinderClicksPerRevolution] = useState<number | null>(
+    initial?.grinderClicksPerRevolution ?? null
+  );
+  const [grinderMicronPerClick, setGrinderMicronPerClick] = useState<number | null>(
+    initial?.grinderMicronPerClick ?? null
+  );
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +61,15 @@ export function BrewerForm({
     value: method.id,
     label: METHOD_LABELS[method.id],
   }));
+
+  const isScale = kind === 'scale';
+  const isGrinder = kind === 'grinder';
+
+  const toggleMode = (mode: ScaleMode) => {
+    setScaleModes((current) =>
+      current.includes(mode) ? current.filter((value) => value !== mode) : [...current, mode]
+    );
+  };
 
   const handleSubmit = async () => {
     if (name.trim() === '') {
@@ -61,9 +83,14 @@ export function BrewerForm({
       methodId,
       manufacturer: emptyToNull(manufacturer),
       model: emptyToNull(model),
-      capacityMl,
+      capacityMl: isScale || isGrinder ? null : capacityMl,
       material: emptyToNull(material),
       notes: emptyToNull(notes),
+      scalePrecisionG: isScale ? scalePrecisionG : null,
+      scaleCapacityG: isScale ? scaleCapacityG : null,
+      scaleModes: isScale ? scaleModes : null,
+      grinderClicksPerRevolution: isGrinder ? grinderClicksPerRevolution : null,
+      grinderMicronPerClick: isGrinder ? grinderMicronPerClick : null,
       isActive,
       sortOrder: initial?.sortOrder ?? 0,
     });
@@ -82,7 +109,7 @@ export function BrewerForm({
         autoFocus={initial === null}
       />
       <View style={styles.field}>
-        <OptionField<BrewerKind>
+        <OptionField<EquipmentKind>
           label="Kind"
           value={kind}
           options={KIND_OPTIONS}
@@ -121,9 +148,76 @@ export function BrewerForm({
         onChangeText={setModel}
         style={styles.field}
       />
-      <View style={styles.field}>
-        <NumberField label="Capacity" value={capacityMl} onChange={setCapacityMl} unit="ml" />
-      </View>
+      {!isScale && !isGrinder ? (
+        <View style={styles.field}>
+          <NumberField label="Capacity" value={capacityMl} onChange={setCapacityMl} unit="ml" />
+        </View>
+      ) : null}
+      {isScale ? (
+        <>
+          <View style={styles.grid}>
+            <View style={styles.gridItem}>
+              <NumberField
+                label="Precision"
+                value={scalePrecisionG}
+                onChange={setScalePrecisionG}
+                unit="g"
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <NumberField
+                label="Capacity"
+                value={scaleCapacityG}
+                onChange={setScaleCapacityG}
+                unit="g"
+              />
+            </View>
+          </View>
+          <Text variant="titleSmall" style={styles.groupTitle}>
+            Modes
+          </Text>
+          <View style={styles.chips} accessibilityRole="list">
+            {SCALE_MODES.map((mode) => {
+              const selected = scaleModes.includes(mode);
+              return (
+                <Chip
+                  key={mode}
+                  selected={selected}
+                  showSelectedCheck={false}
+                  onPress={() => toggleMode(mode)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={SCALE_MODE_LABELS[mode]}
+                  testID={`scale-mode-${mode}`}
+                  style={styles.chip}
+                >
+                  {SCALE_MODE_LABELS[mode]}
+                </Chip>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+      {isGrinder ? (
+        <View style={styles.grid}>
+          <View style={styles.gridItem}>
+            <NumberField
+              label="Clicks per revolution"
+              value={grinderClicksPerRevolution}
+              onChange={setGrinderClicksPerRevolution}
+              integer
+            />
+          </View>
+          <View style={styles.gridItem}>
+            <NumberField
+              label="Microns per click"
+              value={grinderMicronPerClick}
+              onChange={setGrinderMicronPerClick}
+              unit="µm"
+            />
+          </View>
+        </View>
+      ) : null}
       <TextInput
         label="Material"
         mode="outlined"
@@ -173,6 +267,26 @@ const styles = StyleSheet.create({
   },
   field: {
     marginTop: 12,
+  },
+  groupTitle: {
+    marginTop: 16,
+  },
+  grid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  gridItem: {
+    flex: 1,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  chip: {
+    marginBottom: 4,
   },
   switchRow: {
     flexDirection: 'row',

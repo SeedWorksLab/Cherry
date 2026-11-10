@@ -8,6 +8,7 @@ import type {
   StepKind,
 } from '../models';
 import { getDatabase } from './database';
+import { deleteBrewEquipmentByBrew, setBrewEquipment } from './brewEquipment';
 
 interface BrewRow {
   id: number;
@@ -154,6 +155,7 @@ export interface BrewInput {
   beanNameSnapshot: string | null;
   notes: string | null;
   steps: BrewStepInput[];
+  equipmentIds: number[];
 }
 
 const BREW_COLUMNS = `method_id, brewer_id, bean_id, plan_id, recommendation_id, voice_session_id,
@@ -384,6 +386,7 @@ export async function createBrew(input: BrewInput, db?: SQLiteDatabase): Promise
     );
     id = result.lastInsertRowId;
     await insertSteps(database, id, input.steps);
+    await setBrewEquipment(id, input.equipmentIds, database);
     if (input.planId !== null) {
       await database.runAsync(
         `UPDATE plans SET status = 'brewed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -423,6 +426,7 @@ export async function updateBrew(id: number, input: BrewInput, db?: SQLiteDataba
     );
     await database.runAsync('DELETE FROM brew_steps WHERE brew_id = ?', [id]);
     await insertSteps(database, id, input.steps);
+    await setBrewEquipment(id, input.equipmentIds, database);
   });
 }
 
@@ -448,6 +452,7 @@ export async function deleteBrew(id: number, db?: SQLiteDatabase): Promise<void>
       [id]
     );
     await database.runAsync('DELETE FROM brew_steps WHERE brew_id = ?', [id]);
+    await deleteBrewEquipmentByBrew(id, database);
     await database.runAsync('DELETE FROM tastings WHERE brew_id = ?', [id]);
   });
 }

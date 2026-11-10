@@ -9,7 +9,7 @@ import { useAppTheme } from '../theme';
 const TAB_ICONS: Record<string, ComponentProps<typeof MaterialCommunityIcons>['name']> = {
   index: 'home-outline',
   log: 'notebook-outline',
-  equipment: 'coffee-maker-outline',
+  equipment: 'scale',
   learn: 'lightbulb-outline',
   settings: 'cog-outline',
 };

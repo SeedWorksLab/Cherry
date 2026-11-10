@@ -5,12 +5,14 @@ import { BrewForm } from '../../components/brew-form';
 import type { EditableStep } from '../../components/step-list-editor';
 import { useAppData } from '../../data/DataProvider';
 import { getBrewSteps } from '../../database/brews';
+import { getBrewEquipmentByBrew } from '../../database/brewEquipment';
 
 export default function NewBrewScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { ready, brews, addBrew, saveBrew } = useAppData();
   const [steps, setSteps] = useState<EditableStep[] | null>(null);
+  const [equipmentIds, setEquipmentIds] = useState<number[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const brewId = id ? Number(id) : null;
@@ -21,9 +23,13 @@ export default function NewBrewScreen() {
     async function load() {
       if (brewId === null) {
         setSteps([]);
+        setEquipmentIds([]);
         return;
       }
-      const loaded = await getBrewSteps(brewId);
+      const [loaded, loadedEquipment] = await Promise.all([
+        getBrewSteps(brewId),
+        getBrewEquipmentByBrew(brewId),
+      ]);
       if (active) {
         setSteps(
           loaded.map((step) => ({
@@ -39,6 +45,7 @@ export default function NewBrewScreen() {
             note: step.note,
           }))
         );
+        setEquipmentIds(loadedEquipment.map((row) => row.brewerId));
       }
     }
     if (ready) {
@@ -59,6 +66,7 @@ export default function NewBrewScreen() {
       <BrewForm
         initial={existing}
         initialSteps={steps}
+        initialEquipmentIds={equipmentIds}
         submitting={submitting}
         onSubmit={async (input) => {
           setSubmitting(true);

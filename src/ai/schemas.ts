@@ -52,6 +52,7 @@ export function extractionSchemaJson(): Record<string, unknown> {
     bean_name: 'string or null',
     brewer_name: 'string or null',
     grinder_name: 'string or null',
+    equipment_names: ['names of any other gear used (a scale, kettle, filter, cups)'],
     grind_setting_name: 'string or null',
     dose_g: 'number or null',
     water_total_g: 'number or null',
@@ -122,6 +123,7 @@ export interface ParsedExtraction {
   beanName: string | null;
   brewerName: string | null;
   grinderName: string | null;
+  equipmentNames: string[];
   grindSettingName: string | null;
   doseG: number | null;
   waterTotalG: number | null;
@@ -156,6 +158,7 @@ export function emptyParsedExtraction(promptVersion: string): ParsedExtraction {
     beanName: null,
     brewerName: null,
     grinderName: null,
+    equipmentNames: [],
     grindSettingName: null,
     doseG: null,
     waterTotalG: null,

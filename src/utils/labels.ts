@@ -1,10 +1,11 @@
 import type {
   BeanProcess,
   BrewMethodId,
-  BrewerKind,
+  EquipmentKind,
   FlavourCategory,
   GrindUnit,
   RoastLevel,
+  ScaleMode,
   StepKind,
   Verdict,
 } from '../models';
@@ -21,7 +22,7 @@ export const METHOD_LABELS: Record<BrewMethodId, string> = {
   moka: 'Moka Pot',
 };
 
-export const BREWER_KIND_LABELS: Record<BrewerKind, string> = {
+export const EQUIPMENT_KIND_LABELS: Record<EquipmentKind, string> = {
   dripper: 'Dripper',
   kettle: 'Kettle',
   scale: 'Scale',
@@ -33,6 +34,14 @@ export const BREWER_KIND_LABELS: Record<BrewerKind, string> = {
   moka: 'Moka pot',
   cup: 'Cup',
   other: 'Other',
+};
+
+export const SCALE_MODE_LABELS: Record<ScaleMode, string> = {
+  timer: 'Timer',
+  'flow-rate': 'Flow rate',
+  'auto-tare': 'Auto-tare / auto-start',
+  ratio: 'Ratio / recipe mode',
+  espresso: 'Espresso mode',
 };
 
 export const PROCESS_LABELS: Record<BeanProcess, string> = {

@@ -12,6 +12,7 @@ const CONTEXT: ExtractionContext = {
   beans: ['Kenya Nyeri'],
   brewers: ['V60 02'],
   grinders: ['Comandante'],
+  equipment: ['Timemore scale'],
   grindSettings: ['22 clicks'],
   flavourTags: ['Blackcurrant'],
   languageHint: 'en',
@@ -20,15 +21,15 @@ const CONTEXT: ExtractionContext = {
 describe('prompt versioning', () => {
   it('exposes a stable id and version', () => {
     expect(EXTRACTION_PROMPT_ID).toBe('extraction');
-    expect(EXTRACTION_PROMPT_VERSION).toBe('1');
-    expect(EXTRACTION_FOLLOWUP_PROMPT_VERSION).toBe('1-followup');
+    expect(EXTRACTION_PROMPT_VERSION).toBe('3');
+    expect(EXTRACTION_FOLLOWUP_PROMPT_VERSION).toBe('3-followup');
   });
 });
 
 describe('buildExtractionMessages', () => {
   it('produces a system and a user message', () => {
     const messages = buildExtractionMessages({
-      phasedTranscript: '[brew] fifteen grams',
+      transcript: 'fifteen grams',
       context: CONTEXT,
       knownBrew: null,
       answers: [],
@@ -39,7 +40,7 @@ describe('buildExtractionMessages', () => {
 
   it('includes the catalogue and the transcript', () => {
     const user = buildExtractionMessages({
-      phasedTranscript: '[brew] fifteen grams to two fifty',
+      transcript: 'fifteen grams to two fifty',
       context: CONTEXT,
       knownBrew: null,
       answers: [],
@@ -47,13 +48,15 @@ describe('buildExtractionMessages', () => {
     })[1].content;
 
     expect(user).toContain('Kenya Nyeri');
+    expect(user).toContain('Timemore scale');
+    expect(user).toContain('equipment_names');
     expect(user).toContain('fifteen grams to two fifty');
     expect(user).toContain('This is a new brew');
   });
 
   it('lists clarifying answers on a follow-up', () => {
     const user = buildExtractionMessages({
-      phasedTranscript: '[brew] fifteen grams',
+      transcript: 'fifteen grams',
       context: CONTEXT,
       knownBrew: 'dose 15 g',
       answers: [{ fieldPath: 'water_temp_c', question: 'temp?', answer: '93' }],
@@ -66,7 +69,7 @@ describe('buildExtractionMessages', () => {
 
   it('notes an empty catalogue', () => {
     const user = buildExtractionMessages({
-      phasedTranscript: 'hello',
+      transcript: 'hello',
       context: EMPTY_EXTRACTION_CONTEXT,
       knownBrew: null,
       answers: [],

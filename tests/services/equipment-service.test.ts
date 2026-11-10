@@ -1,9 +1,12 @@
 import type { Brewer, BrewMethodId, Method } from '../../src/models';
 import {
+  accessoryEquipment,
   availableMethods,
+  brewingVessels,
   compatibleBrewers,
   methodById,
   methodsForKind,
+  otherEquipment,
 } from '../../src/services/equipment-service';
 
 const METHODS: readonly Method[] = [
@@ -148,5 +151,65 @@ describe('methodById', () => {
   it('returns null for null or unknown ids', () => {
     expect(methodById(null, METHODS)).toBeNull();
     expect(methodById('v60', [])).toBeNull();
+  });
+});
+
+describe('otherEquipment', () => {
+  const brewers = [
+    makeBrewer({ id: 1, name: 'V60 02', kind: 'dripper' }),
+    makeBrewer({ id: 2, name: 'Comandante', kind: 'grinder' }),
+    makeBrewer({ id: 3, name: 'Timemore scale', kind: 'scale' }),
+    makeBrewer({ id: 4, name: 'Fellow Stagg', kind: 'kettle' }),
+    makeBrewer({ id: 5, name: 'Retired scale', kind: 'scale', isActive: false }),
+  ];
+
+  it('offers every active, non-grinder item, in catalogue order', () => {
+    expect(otherEquipment(brewers).map((brewer) => brewer.name)).toEqual([
+      'V60 02',
+      'Timemore scale',
+      'Fellow Stagg',
+    ]);
+  });
+
+  it('excludes the ids the caller already chose', () => {
+    expect(otherEquipment(brewers, [1, 3]).map((brewer) => brewer.name)).toEqual([
+      'Fellow Stagg',
+    ]);
+  });
+});
+
+describe('accessoryEquipment', () => {
+  const brewers = [
+    makeBrewer({ id: 1, name: 'V60 02', kind: 'dripper' }),
+    makeBrewer({ id: 2, name: 'Comandante', kind: 'grinder' }),
+    makeBrewer({ id: 3, name: 'Timemore scale', kind: 'scale' }),
+    makeBrewer({ id: 4, name: 'Fellow Stagg', kind: 'kettle' }),
+    makeBrewer({ id: 5, name: 'V60 filter', kind: 'filter' }),
+    makeBrewer({ id: 6, name: 'Retired cup', kind: 'cup', isActive: false }),
+  ];
+
+  it('keeps only active scales, kettles, filters and cups', () => {
+    expect(accessoryEquipment(brewers).map((brewer) => brewer.name)).toEqual([
+      'Timemore scale',
+      'Fellow Stagg',
+      'V60 filter',
+    ]);
+  });
+});
+
+describe('brewingVessels', () => {
+  const brewers = [
+    makeBrewer({ id: 1, name: 'V60 02', kind: 'dripper' }),
+    makeBrewer({ id: 2, name: 'French press', kind: 'press' }),
+    makeBrewer({ id: 3, name: 'Comandante', kind: 'grinder' }),
+    makeBrewer({ id: 4, name: 'Timemore scale', kind: 'scale' }),
+    makeBrewer({ id: 5, name: 'Retired dripper', kind: 'dripper', isActive: false }),
+  ];
+
+  it('keeps active gear that is neither a grinder nor an accessory', () => {
+    expect(brewingVessels(brewers).map((brewer) => brewer.name)).toEqual([
+      'V60 02',
+      'French press',
+    ]);
   });
 });

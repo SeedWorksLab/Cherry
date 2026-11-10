@@ -1,4 +1,4 @@
-import type { Brewer, BrewerKind, BrewMethodId, Method } from '../models';
+import type { BrewMethodId, Equipment, EquipmentKind, Method } from '../models';
 
 /**
  * The brew methods the user can actually brew today, from their equipment.
@@ -9,48 +9,41 @@ import type { Brewer, BrewerKind, BrewMethodId, Method } from '../models';
  * a brand-new user is never blocked from logging their first brew.
  */
 export function availableMethods(
-  brewers: readonly Brewer[],
+  equipment: readonly Equipment[],
   methods: readonly Method[]
 ): Method[] {
-  const active = brewers.filter((brewer) => brewer.isActive);
+  const active = equipment.filter((item) => item.isActive);
   if (active.length === 0) {
     return [...methods];
   }
-  return methods.filter((method) =>
-    isMethodAvailable(method, active)
-  );
+  return methods.filter((method) => isMethodAvailable(method, active));
 }
 
-function isMethodAvailable(method: Method, active: readonly Brewer[]): boolean {
+function isMethodAvailable(method: Method, active: readonly Equipment[]): boolean {
   if (method.brewerKind === null) {
     return true;
   }
-  const claimed = active.some((brewer) => brewer.methodId === method.id);
+  const claimed = active.some((item) => item.methodId === method.id);
   if (claimed) {
     return true;
   }
-  return active.some(
-    (brewer) => brewer.methodId === null && brewer.kind === method.brewerKind
-  );
+  return active.some((item) => item.methodId === null && item.kind === method.brewerKind);
 }
 
-/** Methods whose brewer kind matches the given kind, for a brewer's own picker. */
-export function methodsForKind(
-  kind: BrewerKind,
-  methods: readonly Method[]
-): Method[] {
+/** Methods whose brewer kind matches the given kind, for an equipment item's own picker. */
+export function methodsForKind(kind: EquipmentKind, methods: readonly Method[]): Method[] {
   return methods.filter((method) => method.brewerKind === kind);
 }
 
-/** Brewers that pair with the given method: bound to it, or generic of its kind. */
+/** Equipment that pairs with the given method: bound to it, or generic of its kind. */
 export function compatibleBrewers(
-  brewers: readonly Brewer[],
+  equipment: readonly Equipment[],
   method: Method
-): Brewer[] {
-  return brewers.filter(
-    (brewer) =>
-      brewer.methodId === method.id ||
-      (brewer.methodId === null && brewer.kind === method.brewerKind)
+): Equipment[] {
+  return equipment.filter(
+    (item) =>
+      item.methodId === method.id ||
+      (item.methodId === null && item.kind === method.brewerKind)
   );
 }
 
@@ -62,4 +55,44 @@ export function methodById(
     return null;
   }
   return methods.find((method) => method.id === id) ?? null;
+}
+
+/**
+ * The active gear a brew can additionally be logged with, in catalogue order.
+ * The grinder has its own field on a brew, so it is never offered here, and
+ * anything already chosen (the brewer, the grinder, an id picked earlier) is
+ * excluded by the caller.
+ */
+export function otherEquipment(
+  equipment: readonly Equipment[],
+  excludedIds: readonly number[] = []
+): Equipment[] {
+  const excluded = new Set(excludedIds);
+  return equipment.filter(
+    (item) => item.isActive && item.kind !== 'grinder' && !excluded.has(item.id)
+  );
+}
+
+const ACCESSORY_KINDS: readonly EquipmentKind[] = ['scale', 'kettle', 'filter', 'cup'];
+
+/**
+ * Scales, kettles, filters and cups: the gear that is neither the brewing
+ * vessel nor the grinder, and so can only be captured as "also used"
+ * (idea.txt §7.3). This is the accessory catalogue the extraction prompt is
+ * given so a spoken name like "my Timemore" can be resolved.
+ */
+export function accessoryEquipment(equipment: readonly Equipment[]): Equipment[] {
+  return equipment.filter((item) => item.isActive && ACCESSORY_KINDS.includes(item.kind));
+}
+
+/**
+ * The active gear a brew is actually brewed in: every kind that is not a
+ * grinder or an accessory. This keeps a scale out of the extraction prompt's
+ * "brewers" list, so a spoken name can only resolve as a brewer when it is one.
+ */
+export function brewingVessels(equipment: readonly Equipment[]): Equipment[] {
+  return equipment.filter(
+    (item) =>
+      item.isActive && item.kind !== 'grinder' && !ACCESSORY_KINDS.includes(item.kind)
+  );
 }

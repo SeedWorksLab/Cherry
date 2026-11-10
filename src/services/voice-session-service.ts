@@ -1,98 +1,43 @@
 import type {
   AudioRetentionPolicy,
-  PhaseMarker,
   TranscriptStatus,
   VoiceMoment,
-  VoicePhase,
   VoiceSessionState,
 } from '../models';
 
-export const PHASE_ORDER: VoicePhase[] = ['prep', 'brew', 'finish', 'taste', 'note'];
-
-export function defaultPhase(): VoicePhase {
-  return 'prep';
-}
-
-export function phaseIndex(phase: VoicePhase): number {
-  return PHASE_ORDER.indexOf(phase);
-}
-
-export function nextPhase(phase: VoicePhase): VoicePhase {
-  const index = phaseIndex(phase);
-  return PHASE_ORDER[(index + 1) % PHASE_ORDER.length];
-}
-
-/**
- * A session that sat idle for longer than the resume threshold resumes at the
- * phase after the one it stopped at (idea.txt §4.3).
- */
-export function phaseAfterGap(
-  current: VoicePhase,
-  gapMs: number,
-  resumeThresholdMs: number
-): VoicePhase {
-  return gapMs >= resumeThresholdMs ? nextPhase(current) : current;
-}
-
-/** The phase in force at an offset: the last marker at or before it. */
-export function phaseAtOffset(
-  markers: PhaseMarker[],
-  offsetMs: number,
-  fallback: VoicePhase
-): VoicePhase {
-  let found: VoicePhase | null = null;
-  for (const marker of markers) {
-    if (marker.offsetMs <= offsetMs) {
-      found = marker.phase;
-    } else {
-      break;
-    }
-  }
-  return found ?? fallback;
-}
-
-export function momentPhase(moment: VoiceMoment, markers: PhaseMarker[]): VoicePhase {
-  if (moment.phase !== null) {
-    return moment.phase;
-  }
-  return phaseAtOffset(markers, moment.startOffsetMs, PRETTY_FALLBACK_PHASE);
-}
-
-const PRETTY_FALLBACK_PHASE: VoicePhase = 'prep';
-
-export interface TranscriptLine {
-  phase: VoicePhase;
-  text: string;
-}
-
-export function transcriptLines(moments: VoiceMoment[], markers: PhaseMarker[]): TranscriptLine[] {
-  const sorted = [...moments].sort((a, b) => a.startOffsetMs - b.startOffsetMs || a.id - b.id);
-  return sorted
+/** The transcript handed to the extraction prompt: succeeded, non-blank, in order. */
+export function buildTranscript(moments: VoiceMoment[]): string {
+  return [...moments]
+    .sort((a, b) => a.startOffsetMs - b.startOffsetMs || a.id - b.id)
     .filter((moment) => moment.transcriptStatus === 'succeeded' && moment.transcript !== null)
-    .map((moment) => ({
-      phase: momentPhase(moment, markers),
-      text: (moment.transcript ?? '').trim(),
-    }))
-    .filter((line) => line.text !== '');
-}
-
-/** The phased transcript handed to the extraction prompt and to the review. */
-export function buildPhasedTranscript(
-  moments: VoiceMoment[],
-  markers: PhaseMarker[]
-): string {
-  return transcriptLines(moments, markers)
-    .map((line) => `[${line.phase}] ${line.text}`)
+    .map((moment) => (moment.transcript ?? '').trim())
+    .filter((text) => text !== '')
     .join('\n');
 }
 
-export function elapsedSeconds(startedAtIso: string, nowIso?: string): number {
-  const start = Date.parse(startedAtIso);
-  const now = nowIso === undefined ? Date.now() : Date.parse(nowIso);
-  if (!Number.isFinite(start) || !Number.isFinite(now)) {
+/**
+ * The recorded audio length: every closed moment's duration plus however long
+ * the open moment has been running. Time spent paused is never counted.
+ */
+export function recordedDurationMs(moments: VoiceMoment[], openDurationMs = 0): number {
+  const closed = moments.reduce((total, moment) => total + (moment.durationMs ?? 0), 0);
+  return closed + Math.max(0, openDurationMs);
+}
+
+const METERING_FLOOR_DB = -60;
+
+/** Maps expo-audio's dBFS metering (about -160..0) onto a 0..1 display level. */
+export function meteringLevel(meteringDb: number | undefined): number {
+  if (meteringDb === undefined || !Number.isFinite(meteringDb)) {
     return 0;
   }
-  return Math.max(0, Math.floor((now - start) / 1000));
+  if (meteringDb >= 0) {
+    return 1;
+  }
+  if (meteringDb <= METERING_FLOOR_DB) {
+    return 0;
+  }
+  return (meteringDb - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
 }
 
 export interface TranscriptCounts {

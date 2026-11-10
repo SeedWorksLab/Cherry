@@ -10,7 +10,7 @@ import type {
   AiState,
   Bean,
   Brew,
-  Brewer,
+  Equipment,
   FlavourTag,
   GrindSetting,
   Method,
@@ -47,12 +47,12 @@ import {
 } from '../database/beans';
 import type { BeanInput } from '../database/beans';
 import {
-  createBrewer,
-  deleteBrewer,
-  getAllBrewers,
-  updateBrewer,
-} from '../database/brewers';
-import type { BrewerInput } from '../database/brewers';
+  createEquipment,
+  deleteEquipment,
+  getAllEquipment,
+  updateEquipment,
+} from '../database/equipment';
+import type { EquipmentInput } from '../database/equipment';
 import {
   createGrindSetting,
   deleteGrindSetting,
@@ -92,7 +92,7 @@ export interface AppData {
   aiState: AiState;
   roasters: Roaster[];
   beans: Bean[];
-  brewers: Brewer[];
+  equipment: Equipment[];
   grindSettings: GrindSetting[];
   methods: Method[];
   recipes: Recipe[];
@@ -111,9 +111,9 @@ export interface AppData {
   removeBean: (id: number) => Promise<void>;
   hardRemoveBean: (id: number) => Promise<void>;
   setBeanRemaining: (id: number, remainingWeightG: number | null) => Promise<void>;
-  addBrewer: (input: BrewerInput) => Promise<number>;
-  saveBrewer: (id: number, input: BrewerInput) => Promise<void>;
-  removeBrewer: (id: number) => Promise<void>;
+  addEquipment: (input: EquipmentInput) => Promise<number>;
+  saveEquipment: (id: number, input: EquipmentInput) => Promise<void>;
+  removeEquipment: (id: number) => Promise<void>;
   addGrindSetting: (input: GrindSettingInput) => Promise<number>;
   saveGrindSetting: (id: number, input: GrindSettingInput) => Promise<void>;
   removeGrindSetting: (id: number) => Promise<void>;
@@ -152,7 +152,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [aiState, setAiState] = useState<AiState>(EMPTY_AI_STATE);
   const [roasters, setRoasters] = useState<Roaster[]>([]);
   const [beans, setBeans] = useState<Bean[]>([]);
-  const [brewers, setBrewers] = useState<Brewer[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [grindSettings, setGrindSettings] = useState<GrindSetting[]>([]);
   const [methods, setMethods] = useState<Method[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -168,7 +168,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         nextAiState,
         nextRoasters,
         nextBeans,
-        nextBrewers,
+        nextEquipment,
         nextGrindSettings,
         nextMethods,
         nextRecipes,
@@ -180,7 +180,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         getAiState(db),
         getAllRoasters(db),
         getAllBeans(db),
-        getAllBrewers(db),
+        getAllEquipment(db),
         getAllGrindSettings(db),
         getAllMethods(db),
         getAllRecipes(db),
@@ -192,7 +192,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setAiState(nextAiState);
       setRoasters(nextRoasters);
       setBeans(nextBeans);
-      setBrewers(nextBrewers);
+      setEquipment(nextEquipment);
       setGrindSettings(nextGrindSettings);
       setMethods(nextMethods);
       setRecipes(nextRecipes);
@@ -245,7 +245,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       aiState,
       roasters,
       beans,
-      brewers,
+      equipment,
       grindSettings,
       methods,
       recipes,
@@ -298,20 +298,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         await setBeanRemainingWeight(id, remainingWeightG, db);
         await refresh();
       },
-      addBrewer: async (input) => {
+      addEquipment: async (input) => {
         const db = await getDatabase();
-        const id = await createBrewer({ ...input, sortOrder: brewers.length }, db);
+        const id = await createEquipment({ ...input, sortOrder: equipment.length }, db);
         await refresh();
         return id;
       },
-      saveBrewer: async (id, input) => {
+      saveEquipment: async (id, input) => {
         const db = await getDatabase();
-        await updateBrewer(id, input, db);
+        await updateEquipment(id, input, db);
         await refresh();
       },
-      removeBrewer: async (id) => {
+      removeEquipment: async (id) => {
         const db = await getDatabase();
-        await deleteBrewer(id, db);
+        await deleteEquipment(id, db);
         await refresh();
       },
       addGrindSetting: async (input) => {
@@ -408,7 +408,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       aiState,
       roasters,
       beans,
-      brewers,
+      equipment,
       grindSettings,
       methods,
       recipes,

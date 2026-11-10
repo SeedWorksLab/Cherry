@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Card, Divider, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, Divider, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BrewMethodId, Brew, GrindUnit } from '../models';
 import { GRIND_UNITS } from '../models';
@@ -11,7 +11,12 @@ import { GRIND_UNIT_LABELS, METHOD_LABELS } from '../utils/labels';
 import { todayDate } from '../utils/date';
 import { beanNameSnapshot, derivedBrewDuration, brewRatio } from '../services/brew-service';
 import { checkHealthyRanges, formatRatio } from '../services/method-service';
-import { availableMethods, compatibleBrewers, methodById } from '../services/equipment-service';
+import {
+  availableMethods,
+  compatibleBrewers,
+  methodById,
+  otherEquipment,
+} from '../services/equipment-service';
 import { KeyboardAwareScrollView } from './keyboard-aware-scroll-view';
 import { DateField } from './date-field';
 import { NumberField } from './number-field';
@@ -22,6 +27,7 @@ import type { EditableStep } from './step-list-editor';
 interface BrewFormProps {
   initial: Brew | null;
   initialSteps: EditableStep[];
+  initialEquipmentIds: number[];
   submitting: boolean;
   onSubmit: (input: BrewInput) => Promise<void>;
 }
@@ -31,7 +37,13 @@ const GRIND_UNIT_OPTIONS = GRIND_UNITS.map((value) => ({
   label: GRIND_UNIT_LABELS[value],
 }));
 
-export function BrewForm({ initial, initialSteps, submitting, onSubmit }: BrewFormProps) {
+export function BrewForm({
+  initial,
+  initialSteps,
+  initialEquipmentIds,
+  submitting,
+  onSubmit,
+}: BrewFormProps) {
   const theme = useAppTheme();
   const { brewers, beans, grindSettings, settings, methods } = useAppData();
 
@@ -53,6 +65,7 @@ export function BrewForm({ initial, initialSteps, submitting, onSubmit }: BrewFo
   const [brewDate, setBrewDate] = useState(initial?.brewDate ?? todayDate());
   const [beanId, setBeanId] = useState<number | null>(initial?.beanId ?? null);
   const [brewerId, setBrewerId] = useState<number | null>(initial?.brewerId ?? null);
+  const [equipmentIds, setEquipmentIds] = useState<number[]>(initialEquipmentIds);
   const [doseG, setDoseG] = useState<number | null>(initial?.doseG ?? null);
   const [waterTotalG, setWaterTotalG] = useState<number | null>(
     initial?.waterTotalG ?? null
@@ -90,6 +103,17 @@ export function BrewForm({ initial, initialSteps, submitting, onSubmit }: BrewFo
   const settingOptions = grindSettings
     .filter((setting) => grinderId === null || setting.brewerId === grinderId)
     .map((setting) => ({ value: setting.id, label: setting.name }));
+
+  const equipmentOptions = useMemo(
+    () => otherEquipment(brewers, brewerId === null ? [] : [brewerId]),
+    [brewers, brewerId]
+  );
+
+  const toggleEquipment = (id: number) => {
+    setEquipmentIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+  };
 
   const selectedBean = beans.find((bean) => bean.id === beanId) ?? null;
   const ratio = formatRatio(brewRatio({ doseG, waterTotalG }));
@@ -131,6 +155,7 @@ export function BrewForm({ initial, initialSteps, submitting, onSubmit }: BrewFo
       beanNameSnapshot: snapshot,
       notes: notes.trim() === '' ? null : notes.trim(),
       steps,
+      equipmentIds,
     });
   };
 
@@ -249,6 +274,33 @@ export function BrewForm({ initial, initialSteps, submitting, onSubmit }: BrewFo
           emptyLabel="Not set"
         />
       </View>
+      {equipmentOptions.length > 0 ? (
+        <View>
+          <Text variant="bodySmall" style={styles.equipmentLabel}>
+            Also used
+          </Text>
+          <View style={styles.chips}>
+            {equipmentOptions.map((brewer) => {
+              const selected = equipmentIds.includes(brewer.id);
+              return (
+                <Chip
+                  key={brewer.id}
+                  selected={selected}
+                  showSelectedCheck={false}
+                  onPress={() => toggleEquipment(brewer.id)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={brewer.name}
+                  style={styles.chip}
+                  testID={`equipment-${brewer.id}`}
+                >
+                  {brewer.name}
+                </Chip>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <Divider style={styles.divider} />
       <Text variant="titleSmall" style={styles.groupTitle}>
@@ -320,6 +372,18 @@ const styles = StyleSheet.create({
   },
   field: {
     marginTop: 12,
+  },
+  equipmentLabel: {
+    marginTop: 12,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  chip: {
+    marginRight: 0,
   },
   summary: {
     marginTop: 8,

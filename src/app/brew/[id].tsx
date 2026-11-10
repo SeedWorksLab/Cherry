@@ -9,9 +9,10 @@ import { AppDialog } from '../../components/app-dialog';
 import { ratingLabel } from '../../components/rating-selector';
 import { useAppData } from '../../data/DataProvider';
 import { useAppTheme } from '../../theme';
-import type { BrewStep } from '../../models';
+import type { BrewStep, Brewer } from '../../models';
 import { getBrewSteps } from '../../database/brews';
-import { VERDICT_LABELS, METHOD_LABELS } from '../../utils/labels';
+import { getBrewEquipmentByBrew } from '../../database/brewEquipment';
+import { BREWER_KIND_LABELS, VERDICT_LABELS, METHOD_LABELS } from '../../utils/labels';
 import { longDateLabel } from '../../utils/date';
 import { brewRatio, derivedBrewDuration } from '../../services/brew-service';
 import { formatRatio } from '../../services/method-service';
@@ -20,8 +21,9 @@ import { summarizeTastings } from '../../services/tasting-service';
 export default function BrewDetailScreen() {
   const theme = useAppTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { brews, beans, tastings, removeBrew } = useAppData();
+  const { brews, beans, brewers, tastings, removeBrew } = useAppData();
   const [steps, setSteps] = useState<BrewStep[] | null>(null);
+  const [equipmentIds, setEquipmentIds] = useState<number[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const brewId = Number(id);
@@ -30,9 +32,13 @@ export default function BrewDetailScreen() {
   useEffect(() => {
     let active = true;
     async function load() {
-      const loaded = await getBrewSteps(brewId);
+      const [loadedSteps, loadedEquipment] = await Promise.all([
+        getBrewSteps(brewId),
+        getBrewEquipmentByBrew(brewId),
+      ]);
       if (active) {
-        setSteps(loaded);
+        setSteps(loadedSteps);
+        setEquipmentIds(loadedEquipment.map((row) => row.brewerId));
       }
     }
     if (Number.isFinite(brewId)) {
@@ -56,7 +62,7 @@ export default function BrewDetailScreen() {
     );
   }
 
-  if (steps === null) {
+  if (steps === null || equipmentIds === null) {
     return <LoadingScreen />;
   }
 
@@ -66,6 +72,11 @@ export default function BrewDetailScreen() {
   const summary = summarizeTastings(brewTastings);
   const ratio = formatRatio(brewRatio(brew));
   const duration = derivedBrewDuration(steps, brew.totalTimeS);
+  const brewer = brewers.find((candidate) => candidate.id === brew.brewerId) ?? null;
+  const grinder = brewers.find((candidate) => candidate.id === brew.grinderId) ?? null;
+  const extraEquipment = equipmentIds
+    .map((brewerId) => brewers.find((candidate) => candidate.id === brewerId))
+    .filter((candidate): candidate is Brewer => candidate !== undefined);
 
   return (
     <ScreenFade>
@@ -106,6 +117,37 @@ export default function BrewDetailScreen() {
             description={`${brew.grindValue}${brew.grindUnit ? ` ${brew.grindUnit}` : ''}`}
             left={(props) => <List.Icon {...props} icon="cog-outline" />}
           />
+        ) : null}
+
+        {brewer !== null || grinder !== null || extraEquipment.length > 0 ? (
+          <>
+            <Divider style={styles.divider} />
+            <Text variant="titleMedium" style={styles.section}>
+              Equipment
+            </Text>
+            {brewer !== null ? (
+              <List.Item
+                title="Brewer"
+                description={brewer.name}
+                left={(props) => <List.Icon {...props} icon="coffee-outline" />}
+              />
+            ) : null}
+            {grinder !== null ? (
+              <List.Item
+                title="Grinder"
+                description={grinder.name}
+                left={(props) => <List.Icon {...props} icon="cog-outline" />}
+              />
+            ) : null}
+            {extraEquipment.map((item) => (
+              <List.Item
+                key={item.id}
+                title={BREWER_KIND_LABELS[item.kind]}
+                description={item.name}
+                left={(props) => <List.Icon {...props} icon="scale-balance" />}
+              />
+            ))}
+          </>
         ) : null}
 
         <Divider style={styles.divider} />

@@ -74,7 +74,7 @@ export default function OverviewScreen() {
           <EmptyState
             icon={
               <MaterialCommunityIcons
-                name="coffee-maker-outline"
+                name="filter-outline"
                 size={48}
                 color={theme.colors.onSurfaceVariant}
               />

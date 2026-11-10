@@ -1,4 +1,4 @@
-import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
 export interface LiveTranscriptionHandle {
   /** Stops live recognition and resolves with the final transcript, if any. */
@@ -12,14 +12,35 @@ export interface LiveTranscriptionOptions {
   onError: (message: string) => void;
 }
 
+type SpeechRecognitionModule = typeof import('expo-speech-recognition')['ExpoSpeechRecognitionModule'];
+
 const STOP_TIMEOUT_MS = 8000;
 
+let cachedModule: SpeechRecognitionModule | null | undefined;
+
+/**
+ * The speech recogniser is an optional native module. It is resolved lazily so a
+ * build that ships without it degrades to "unavailable" rather than throwing
+ * when this file is imported.
+ */
+function speechModule(): SpeechRecognitionModule | null {
+  if (cachedModule === undefined) {
+    cachedModule = requireOptionalNativeModule<SpeechRecognitionModule>('ExpoSpeechRecognition');
+  }
+  return cachedModule;
+}
+
 export function isLiveTranscriptionAvailable(): boolean {
-  return ExpoSpeechRecognitionModule.isRecognitionAvailable();
+  const module = speechModule();
+  return module !== null && module.isRecognitionAvailable();
 }
 
 export async function requestSpeechRecognitionPermission(): Promise<boolean> {
-  const response = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+  const module = speechModule();
+  if (module === null) {
+    return false;
+  }
+  const response = await module.requestPermissionsAsync();
   return response.granted;
 }
 
@@ -29,6 +50,11 @@ export async function requestSpeechRecognitionPermission(): Promise<boolean> {
  * a durable copy; the engine is just how a spoken moment becomes text.
  */
 export function startLiveTranscription(options: LiveTranscriptionOptions): LiveTranscriptionHandle {
+  const module = speechModule();
+  if (module === null) {
+    return { stop: async () => null, abort: () => {} };
+  }
+
   let transcript = '';
   let confidence: number | null = null;
   let stopped = false;
@@ -61,11 +87,11 @@ export function startLiveTranscription(options: LiveTranscriptionOptions): LiveT
       }
     };
 
-    const resultSub = ExpoSpeechRecognitionModule.addListener('result', onResult as never);
-    const endSub = ExpoSpeechRecognitionModule.addListener('end', onEnd as never);
-    const errorSub = ExpoSpeechRecognitionModule.addListener('error', onError as never);
+    const resultSub = module.addListener('result', onResult as never);
+    const endSub = module.addListener('end', onEnd as never);
+    const errorSub = module.addListener('error', onError as never);
 
-    ExpoSpeechRecognitionModule.start({
+    module.start({
       lang: options.language ?? 'en',
       interimResults: true,
       continuous: true,
@@ -90,14 +116,14 @@ export function startLiveTranscription(options: LiveTranscriptionOptions): LiveT
       if (stopped) {
         return transcript === '' ? null : { text: transcript, confidence };
       }
-      ExpoSpeechRecognitionModule.stop();
+      module.stop();
       await finish;
       void timedOut;
       return transcript === '' ? null : { text: transcript, confidence };
     },
     abort: () => {
       if (!stopped) {
-        ExpoSpeechRecognitionModule.abort();
+        module.abort();
       }
     },
   };

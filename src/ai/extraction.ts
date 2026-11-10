@@ -127,6 +127,7 @@ export function parseExtractionJson(text: string): ParsedExtraction | null {
   parsed.beanName = asText(raw.bean_name);
   parsed.brewerName = asText(raw.brewer_name);
   parsed.grinderName = asText(raw.grinder_name);
+  parsed.equipmentNames = strList(raw.equipment_names);
   parsed.grindSettingName = asText(raw.grind_setting_name);
   parsed.doseG = asNumber(raw.dose_g);
   parsed.waterTotalG = asNumber(raw.water_total_g);
@@ -161,6 +162,7 @@ const BREW_CANDIDATE_DEFS: { fieldPath: string; label: string; pick(p: ParsedExt
   { fieldPath: 'bean_name', label: 'Bean', pick: (p) => p.beanName },
   { fieldPath: 'brewer_name', label: 'Brewer', pick: (p) => p.brewerName },
   { fieldPath: 'grinder_name', label: 'Grinder', pick: (p) => p.grinderName },
+  { fieldPath: 'equipment_names', label: 'Equipment', pick: (p) => (p.equipmentNames.length ? p.equipmentNames.join(', ') : null) },
   { fieldPath: 'grind_setting_name', label: 'Grind setting', pick: (p) => p.grindSettingName },
   { fieldPath: 'dose_g', label: 'Dose', pick: (p) => p.doseG },
   { fieldPath: 'water_total_g', label: 'Water', pick: (p) => p.waterTotalG },
@@ -266,6 +268,7 @@ export interface ResolvedExtraction {
   bean: EntityMatch | null;
   brewer: EntityMatch | null;
   grinder: EntityMatch | null;
+  equipment: EntityMatch[];
   grindSetting: EntityMatch | null;
   matchedMethodName: string | null;
   flavourTagIds: string[];
@@ -276,6 +279,7 @@ export function resolveExtractionNames(parsed: ParsedExtraction, context: Extrac
   const beans: EntityMatch[] = context.beans.map((name, index) => ({ entityId: index + 1, name }));
   const brewers: EntityMatch[] = context.brewers.map((name, index) => ({ entityId: index + 1, name }));
   const grinders: EntityMatch[] = context.grinders.map((name, index) => ({ entityId: index + 1, name }));
+  const equipment: EntityMatch[] = context.equipment.map((name, index) => ({ entityId: index + 1, name }));
   const grindSettings: EntityMatch[] = context.grindSettings.map((name, index) => ({ entityId: index + 1, name }));
 
   const flavourTagSet = new Set(context.flavourTags.map((tag) => tag.toLowerCase()));
@@ -283,11 +287,20 @@ export function resolveExtractionNames(parsed: ParsedExtraction, context: Extrac
     .filter((tag) => flavourTagSet.has(tag.toLowerCase()))
     .map((tag) => context.flavourTags[context.flavourTags.findIndex((known) => known.toLowerCase() === tag.toLowerCase())]);
 
+  const claimed = new Set(
+    [parsed.brewerName, parsed.grinderName]
+      .filter((name): name is string => name !== null)
+      .map((name) => name.toLowerCase())
+  );
+
   return {
     parsed,
     bean: parsed.beanName === null ? null : matchCatalogue(beans, parsed.beanName),
     brewer: parsed.brewerName === null ? null : matchCatalogue(brewers, parsed.brewerName),
     grinder: parsed.grinderName === null ? null : matchCatalogue(grinders, parsed.grinderName),
+    equipment: parsed.equipmentNames
+      .map((name) => matchCatalogue(equipment, name))
+      .filter((match): match is EntityMatch => match !== null && !claimed.has(match.name.toLowerCase())),
     grindSetting: parsed.grindSettingName === null
       ? null
       : matchCatalogue(grindSettings, parsed.grindSettingName),
@@ -301,7 +314,7 @@ export function resolveExtractionNames(parsed: ParsedExtraction, context: Extrac
 export interface RunExtractionOptions {
   provider: AiProvider;
   model: string;
-  phasedTranscript: string;
+  transcript: string;
   context: ExtractionContext;
   knownBrew?: string | null;
   answers?: ClarifyingQuestionAnswer[];
@@ -318,7 +331,7 @@ export async function runExtraction(options: RunExtractionOptions): Promise<Extr
   const answers = options.answers ?? [];
   const followUp = answers.length > 0;
   const messages = buildExtractionMessages({
-    phasedTranscript: options.phasedTranscript,
+    transcript: options.transcript,
     context: options.context,
     knownBrew: options.knownBrew ?? null,
     answers,

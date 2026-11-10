@@ -14,7 +14,7 @@ export type BrewMethodId = (typeof BREW_METHOD_IDS)[number];
 export const METHOD_FAMILIES = ['pour-over', 'immersion', 'pressure', 'cold'] as const;
 export type MethodFamily = (typeof METHOD_FAMILIES)[number];
 
-export const BREWER_KINDS = [
+export const EQUIPMENT_KINDS = [
   'dripper',
   'kettle',
   'scale',
@@ -27,7 +27,7 @@ export const BREWER_KINDS = [
   'cup',
   'other',
 ] as const;
-export type BrewerKind = (typeof BREWER_KINDS)[number];
+export type EquipmentKind = (typeof EQUIPMENT_KINDS)[number];
 
 export const BEAN_PROCESSES = [
   'washed',
@@ -53,6 +53,9 @@ export type RoastLevel = (typeof ROAST_LEVELS)[number];
 
 export const GRIND_UNITS = ['clicks', 'setting', 'microns', 'notch', 'unknown'] as const;
 export type GrindUnit = (typeof GRIND_UNITS)[number];
+
+export const SCALE_MODES = ['timer', 'flow-rate', 'auto-tare', 'ratio', 'espresso'] as const;
+export type ScaleMode = (typeof SCALE_MODES)[number];
 
 export const STEP_KIND_IDS = [
   'dose',
@@ -204,7 +207,7 @@ export interface Method {
   id: BrewMethodId;
   name: string;
   family: MethodFamily;
-  brewerKind: BrewerKind | null;
+  brewerKind: EquipmentKind | null;
   supportsPressure: boolean;
   supportsGrinder: boolean;
   defaultStepTemplate: string | null;
@@ -286,17 +289,22 @@ export interface Bean {
   deleted: boolean;
 }
 
-export interface Brewer {
+export interface Equipment {
   id: number;
   uuid: string | null;
   name: string;
-  kind: BrewerKind;
+  kind: EquipmentKind;
   methodId: BrewMethodId | null;
   manufacturer: string | null;
   model: string | null;
   capacityMl: number | null;
   material: string | null;
   notes: string | null;
+  scalePrecisionG: number | null;
+  scaleCapacityG: number | null;
+  scaleModes: ScaleMode[] | null;
+  grinderClicksPerRevolution: number | null;
+  grinderMicronPerClick: number | null;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
@@ -573,6 +581,15 @@ export interface Brew {
   createdAt: string;
   updatedAt: string | null;
   deleted: boolean;
+}
+
+export interface BrewEquipment {
+  id: number;
+  uuid: string | null;
+  brewId: number;
+  brewerId: number;
+  createdAt: string;
+  updatedAt: string | null;
 }
 
 export interface Tasting {

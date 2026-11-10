@@ -20,7 +20,12 @@ import { RatingSelector } from '../../components/rating-selector';
 import type { TasteRating } from '../../components/rating-selector';
 import { NumberField } from '../../components/number-field';
 import { useAppData } from '../../data/DataProvider';
-import { availableMethods } from '../../services/equipment-service';
+import {
+  accessoryEquipment,
+  availableMethods,
+  brewingVessels,
+  otherEquipment,
+} from '../../services/equipment-service';
 import { useAppTheme } from '../../theme';
 import {
   ATTRIBUTE_LEVELS,
@@ -28,6 +33,7 @@ import {
   STEP_KIND_IDS,
   VERDICTS,
   type AttributeLevel,
+  type Brewer,
   type BrewMethodId,
   type ExtractionQuestion,
   type ExtractionRun,
@@ -40,7 +46,6 @@ import {
 import {
   attachSessionToBrew,
   getMomentsBySession,
-  getPhaseMarkersBySession,
   getVoiceSession,
   setMomentAudioPath,
   setVoiceSessionEnded,
@@ -58,7 +63,7 @@ import {
 } from '../../database/extractionRuns';
 import type { BrewStepInput } from '../../database/brews';
 import {
-  buildPhasedTranscript,
+  buildTranscript,
   hasUsableTranscript,
   shouldDeleteAudio,
   transcriptCounts,
@@ -95,6 +100,7 @@ const ATTRIBUTE_LABELS: Record<AttributeLevel, string> = {
 interface Edits {
   methodId: BrewMethodId | null;
   beanId: number | null;
+  equipmentIds: number[];
   doseG: number | null;
   waterTotalG: number | null;
   waterTempC: number | null;
@@ -112,10 +118,39 @@ interface Edits {
   includeTasting: boolean;
 }
 
-function editsFromExtraction(parsed: ParsedExtraction, defaultMethodId: BrewMethodId | null): Edits {
+/**
+ * Resolves the spoken equipment names against the user's own gear. The vessel
+ * and the grinder have their own fields, so a name that already matched one of
+ * them is not recorded again as "also used".
+ */
+function resolveEquipmentIds(parsed: ParsedExtraction, brewers: readonly Brewer[]): number[] {
+  const claimed = new Set(
+    [parsed.brewerName, parsed.grinderName]
+      .filter((name): name is string => name !== null)
+      .map((name) => name.toLowerCase())
+  );
+  const candidates = brewers
+    .filter((brewer) => brewer.kind !== 'grinder')
+    .map((brewer) => ({ entityId: brewer.id, name: brewer.name }));
+  const ids: number[] = [];
+  for (const name of parsed.equipmentNames) {
+    const match = matchCatalogue(candidates, name);
+    if (match && !claimed.has(match.name.toLowerCase()) && !ids.includes(match.entityId)) {
+      ids.push(match.entityId);
+    }
+  }
+  return ids;
+}
+
+function editsFromExtraction(
+  parsed: ParsedExtraction,
+  defaultMethodId: BrewMethodId | null,
+  brewers: readonly Brewer[]
+): Edits {
   return {
     methodId: parsed.methodId ?? defaultMethodId,
     beanId: null,
+    equipmentIds: resolveEquipmentIds(parsed, brewers),
     doseG: parsed.doseG,
     waterTotalG: parsed.waterTotalG,
     waterTempC: parsed.waterTempC,
@@ -185,18 +220,19 @@ export default function ReviewScreen() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [undoState, setUndoState] = useState<{ brewId: number; show: boolean } | null>(null);
   const editsInitialised = useRef(false);
-  const statesRef = useRef({ settings, aiState });
+  const statesRef = useRef({ settings, aiState, brewers });
 
   useEffect(() => {
-    statesRef.current = { settings, aiState };
-  }, [settings, aiState]);
+    statesRef.current = { settings, aiState, brewers };
+  }, [settings, aiState, brewers]);
 
   const context: ExtractionContext = useMemo(
     () => ({
       methods: methods.map((method) => method.name),
       beans: beans.map((bean) => bean.name),
-      brewers: brewers.filter((brewer) => brewer.kind !== 'grinder').map((brewer) => brewer.name),
+      brewers: brewingVessels(brewers).map((brewer) => brewer.name),
       grinders: brewers.filter((brewer) => brewer.kind === 'grinder').map((brewer) => brewer.name),
+      equipment: accessoryEquipment(brewers).map((brewer) => brewer.name),
       grindSettings: grindSettings.map((setting) => setting.name),
       flavourTags: flavourTags.map((tag) => tag.name),
       languageHint: aiState.sttLanguage,
@@ -211,7 +247,7 @@ export default function ReviewScreen() {
     setParsed(reparsed);
     if (reparsed) {
       const current = statesRef.current;
-      const nextEdits = editsFromExtraction(reparsed, current.settings.defaultMethodId);
+      const nextEdits = editsFromExtraction(reparsed, current.settings.defaultMethodId, current.brewers);
       if (!editsInitialised.current) {
         editsInitialised.current = true;
         setEdits(nextEdits);
@@ -259,7 +295,7 @@ export default function ReviewScreen() {
         const outcome = await runExtraction({
           provider,
           model,
-          phasedTranscript: text,
+          transcript: text,
           context,
           answers: answers ?? [],
         });
@@ -312,17 +348,16 @@ export default function ReviewScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [loadedSession, loadedMoments, loadedMarkers] = await Promise.all([
+      const [loadedSession, loadedMoments] = await Promise.all([
         getVoiceSession(sessionId),
         getMomentsBySession(sessionId),
-        getPhaseMarkersBySession(sessionId),
       ]);
       if (cancelled || loadedSession === null) {
         return;
       }
       setSession(loadedSession);
       setMoments(loadedMoments);
-      const text = buildPhasedTranscript(loadedMoments, loadedMarkers);
+      const text = buildTranscript(loadedMoments);
       setTranscriptText(text);
       setTranscriptDraft(text);
 
@@ -374,10 +409,10 @@ export default function ReviewScreen() {
       return null;
     }
     const grinders = brewers.filter((brewer) => brewer.kind === 'grinder');
-    const nonGrinders = brewers.filter((brewer) => brewer.kind !== 'grinder');
+    const vessels = brewingVessels(brewers);
     const bean = parsed.beanName ? matchCatalogue(beans.map((b) => ({ entityId: b.id, name: b.name })), parsed.beanName) : null;
     const brewer = parsed.brewerName
-      ? matchCatalogue(nonGrinders.map((b) => ({ entityId: b.id, name: b.name })), parsed.brewerName)
+      ? matchCatalogue(vessels.map((b) => ({ entityId: b.id, name: b.name })), parsed.brewerName)
       : null;
     const grinder = parsed.grinderName
       ? matchCatalogue(grinders.map((g) => ({ entityId: g.id, name: g.name })), parsed.grinderName)
@@ -385,13 +420,18 @@ export default function ReviewScreen() {
     const grindSetting = parsed.grindSettingName
       ? matchCatalogue(grindSettings.map((g) => ({ entityId: g.id, name: g.name })), parsed.grindSettingName)
       : null;
-    return { bean, brewer, grinder, grindSetting, grinders, nonGrinders };
+    return { bean, brewer, grinder, grindSetting, grinders, vessels };
   }, [parsed, beans, brewers, grindSettings]);
 
   const beanMatch = resolved?.bean ?? null;
   const brewerMatch = resolved?.brewer ?? null;
   const grinderMatch = resolved?.grinder ?? null;
   const grindSettingMatch = resolved?.grindSetting ?? null;
+
+  const equipmentOptions = useMemo(
+    () => otherEquipment(brewers, brewerMatch === null ? [] : [brewerMatch.entityId]),
+    [brewers, brewerMatch]
+  );
 
   function valueChanged(fieldPath: string): boolean {
     if (edits === null || parsed === null) {
@@ -426,7 +466,7 @@ export default function ReviewScreen() {
       return;
     }
     const draftEdits = byAutoAccept
-      ? editsFromExtraction(parsedToCommit, statesRef.current.settings.defaultMethodId)
+      ? editsFromExtraction(parsedToCommit, statesRef.current.settings.defaultMethodId, statesRef.current.brewers)
       : edits;
     if (draftEdits === null) {
       return;
@@ -475,6 +515,7 @@ export default function ReviewScreen() {
         beanNameSnapshot: beanMatch?.name ?? parsedToCommit.beanName,
         notes: draftEdits.notes.trim() === '' ? null : draftEdits.notes.trim(),
         steps,
+        equipmentIds: draftEdits.equipmentIds,
       });
 
       await attachSessionToBrew(session.id, brewId);
@@ -588,6 +629,15 @@ export default function ReviewScreen() {
         targetId: brewId,
         fieldPath: 'bean_id',
         source: 'manual',
+        accepted: true,
+      });
+    }
+    if (draftEdits.equipmentIds.length > 0) {
+      await createExtractionProvenance(runId, {
+        target: 'brew',
+        targetId: brewId,
+        fieldPath: 'equipment_ids',
+        source: source.equipmentNames.length > 0 ? 'automated' : 'manual',
         accepted: true,
       });
     }
@@ -827,6 +877,46 @@ export default function ReviewScreen() {
                     <Chip selected icon="check" style={styles.chip} testID="review-bean">
                       {beanMatch.name}
                     </Chip>
+                  </>
+                ) : null}
+
+                {equipmentOptions.length > 0 ? (
+                  <>
+                    <Divider style={styles.divider} />
+                    <Text variant="labelMedium">Also used</Text>
+                    <View style={styles.chipRow}>
+                      {equipmentOptions.map((brewer) => {
+                        const selected = edits?.equipmentIds.includes(brewer.id) ?? false;
+                        return (
+                          <Chip
+                            key={brewer.id}
+                            selected={selected}
+                            showSelectedCheck={false}
+                            onPress={() =>
+                              setEdits((current) => {
+                                if (current === null) {
+                                  return current;
+                                }
+                                const has = current.equipmentIds.includes(brewer.id);
+                                return {
+                                  ...current,
+                                  equipmentIds: has
+                                    ? current.equipmentIds.filter((id) => id !== brewer.id)
+                                    : [...current.equipmentIds, brewer.id],
+                                };
+                              })
+                            }
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: selected }}
+                            accessibilityLabel={brewer.name}
+                            style={styles.chip}
+                            testID={`review-equipment-${brewer.id}`}
+                          >
+                            {brewer.name}
+                          </Chip>
+                        );
+                      })}
+                    </View>
                   </>
                 ) : null}
 

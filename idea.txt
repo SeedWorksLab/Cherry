@@ -169,14 +169,14 @@ minutes; recording a tasting may happen the next morning. The session holds all
 of it and the UI never forces the user to finish.
 
 A session has: a start time, a current state (`recording`, `paused`, `stopped`,
-`transcribing`, `extracting`, `review`, `committed`, `discarded`), an ordered list
-of **moments**, and a phase marker trail.
+`transcribing`, `extracting`, `review`, `committed`, `discarded`) and an ordered
+list of **moments**.
 
 **A moment** is one continuous chunk of audio with a start offset in milliseconds
-from the session start, a duration, an audio file path, a `phase`, and — once
-transcribed — a transcript and a confidence value. Pausing ends a moment;
-resuming starts a new one. This is what makes an appendable stream possible
-without corrupting one giant file.
+from the session start, a duration, an audio file path, and — once transcribed —
+a transcript and a confidence value. Pausing ends a moment; resuming starts a new
+one. This is what makes an appendable stream possible without corrupting one
+giant file.
 
 **Enforced invariant.** A moment's audio is written and closed before
 transcription begins. Transcription never operates on a file that is still being
@@ -185,9 +185,9 @@ session reopens in `paused`.
 
 ### 4.2 Phases
 
-Every moment carries a phase, chosen from a fixed set. The user can switch phase
-with one tap at any time without stopping the recording, and the marker is
-recorded at the current offset.
+Phases are the extraction LLM's job, not the user's. The user records one
+continuous ramble and taps nothing but start, pause and send; the assistant works
+out from the words which part of the brew each sentence describes.
 
 ```
 prep     # grinding, weighing, heating, setup
@@ -197,14 +197,14 @@ taste    # drinking it, the verdict, descriptors
 note     # anything else: a realisation, a correction, a shopping note
 ```
 
-Phases are the LLM's grounding. A sentence in a `brew` moment is far more likely
-to contain a weight or a time than one in a `taste` moment, and the extraction
-prompt is built accordingly. Phase is also what lets the taste ramble happen
-tomorrow morning and still land in the right place.
-
-The default phase on session start is `prep`. The default when resuming after a
-gap longer than the configured threshold (default 5 minutes) is `taste`, because
-that is the overwhelmingly likely case.
+Phase is the LLM's grounding. A sentence about a weight or a time is far more
+likely to belong to the brew than to the tasting, and the extraction prompt is
+built accordingly. Phase is also what lets the taste ramble happen tomorrow
+morning and still land in the right place. Because the transcript is not tagged
+by hand, the prompt tells the model that the recording mixes setup, pour, finish
+and tasting in whatever order they were spoken, and to read each sentence on its
+own sense. The model never writes to storage; it infers the phase only to decide
+what a sentence means.
 
 ### 4.3 Transcription
 
@@ -296,7 +296,7 @@ an in-app `sync_state` singleton. The pattern is intentional.
 
 Four distinct jobs, each with its own prompt and its own validation:
 
-1. **Extraction.** Given a session's phased transcript and the current brew's
+1. **Extraction.** Given a session's transcript and the current brew's
    already-known fields, produce a strict JSON object of candidate field values.
 2. **Narration.** Given a structured recommendation produced by the deterministic
    engine (§11.3), write one short human paragraph explaining it.
@@ -600,7 +600,7 @@ A `custom` method is **not** in v1. Adding a tenth method is a code change, a
 migration and a `release-plan.md` entry, not a user action. This is deliberate:
 the structured shapes are the point, and a free-form method would be a
 half-feature. Users who brew something else record it as the closest supported
-method and use the `note` phase.
+method and note the difference.
 
 ### 8.2 Recipe core parameters
 
@@ -1312,8 +1312,8 @@ the screen and the brand row leads. Top to bottom:
 - A **Next up** card. Either the current recommendation (with its mode chip and
   one-line rationale) or, if none exists, a prompt to brew. Tapping opens the
   recommendation or, if there is none, the method picker.
-- A **current session banner** if a voice session is open, showing the elapsed
-  time, the current phase, and a resume action. Absent otherwise.
+- A **current session banner** if a voice session is open, showing the recorded
+  length and a resume action. Absent otherwise.
 - **Recent brews** — the last few, each showing method, bean, rating and relative
   day, tapping through to the brew detail.
 - Two `StatCard` tiles: brews logged this week, and the average rating of the
@@ -1412,19 +1412,20 @@ Grouped `List` sections, mirroring Coconut's Settings:
 
 The single most important screen in the app. It is a full-screen modal with:
 
-- a large elapsed timer
-- the current phase as a chip row, switchable with one tap without interrupting
-  recording
-- a live waveform or level meter from `expo-audio` sample metering
-- a big pause/resume control and a stop control
-- a scrollable list of the moments recorded so far, each with its phase, its
-  duration and its transcript once available
-- a persistent hint that the user can ramble and nothing needs to be precise
-- a "finish and extract" action that is enabled only once at least one moment has
-  been closed
+- a large recorded-length timer, showing only the length of audio captured. It
+  never counts wall-clock time and never counts time spent paused.
+- one primary control: a circular record button. Tap it to start, tap it again to
+  pause, tap once more to resume. There is no separate stop control and no phase
+  picker; the user classifies nothing.
+- live audio-level waves around the record button, driven by `expo-audio` sample
+  metering, so the user can see the microphone hearing them.
+- a persistent hint that the user can ramble and nothing needs to be precise.
+- a **send** action that finishes the recording, transcribes every moment and
+  opens the review. It is enabled once at least one moment exists and does not
+  care whether the session is recording or paused.
 
-It never shows a form. The form comes after, in `/record/review`, and only if the
-user wants it.
+It never shows a form and never asks the user to label what they are saying. The
+form comes after, in `/record/review`, and only if the user wants it.
 
 ---
 
@@ -1537,7 +1538,7 @@ insight-service.ts          the findings of §12
 tasting-service.ts          tasting aggregation of §10.5
 brew-service.ts             plan-vs-brew diffing, derived ratio
 bean-service.ts             freshness, rotation, remaining weight
-voice-session-service.ts    moments, phases, session lifecycle
+voice-session-service.ts    moments, transcript, session lifecycle
 ```
 
 `src/ai/` holds:
@@ -1607,7 +1608,7 @@ Cherry/
 ├── idea.txt             this file: the product and architecture spec
 ├── theme.md             the complete theme and design-token specification
 ├── release-plan.md      the running release backlog (gitignored)
-├── LICENSE              MIT
+├── LICENSE              AGPL-3.0
 ├── app.json             Expo app configuration
 ├── package.json         dependencies and scripts
 ├── tsconfig.json        TypeScript, strict
